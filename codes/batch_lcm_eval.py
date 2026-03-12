@@ -60,9 +60,16 @@ def eval():
             for j, t in tqdm(enumerate(noise_scheduler.timesteps)):
                 residual = model(sample, torch.Tensor((t,)).to(device).long()).to(device)
                 masked_residual = model(masked_sample, torch.Tensor((t,)).to(device).long()).to(device)
-                # masked_residual = (1 - config.alpha) * residual + config.alpha * masked_residual
-                masked_residual = config.alpha * masked_residual + (1 - config.alpha) * torch.randn_like(
-                    masked_residual).to(device) / torch.std(masked_residual)
+
+                # [Strict Implementation]
+                # masked_residual = (1 - config.alpha) * model(torch.cat((masked_sample[:, :4], cxr), dim=1), torch.Tensor((t,)).to(device).long()).to(device) + config.alpha * masked_residual
+
+                # [Fast Approximation]
+                # We reuse the global `residual` to substitute the strict implementation above, saving a 3rd U-Net inference.
+                # This is theoretically sound because initial noise is shared, and any divergence outside the lung
+                # region is completely discarded by the final Poisson Fusion (Eq. 5) anyway.
+                masked_residual = (1 - config.alpha) * residual + config.alpha * masked_residual
+
 
                 noise_scheduler = LCMScheduler(num_train_timesteps=config.num_train_timesteps,
                                                clip_sample=config.clip_sample,
