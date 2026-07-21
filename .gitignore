@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Model checkpoints and large binary artifacts
+# ---------------------------------------------------------------------------
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.tar
+*.tar.gz
+*.zip
+
+# ---------------------------------------------------------------------------
+# Conda environments and package caches
+# ---------------------------------------------------------------------------
+conda_package_cache/
+download_tools_conda_env/
+gl_lcm_inference_env/
+pip_cache/
+torch_cache/
+cache/
+matplotlib_cache/
+
+# Generic environment directories
+.conda/
+.env/
+venv/
+.venv/
+env/
+
+# ---------------------------------------------------------------------------
+# Generated datasets and inference outputs
+# ---------------------------------------------------------------------------
+outputs/
+vindr_train_pilot/
+pilot_outputs/
+generated/
+results/
+logs/
+
+# Medical-image and dataset artifacts
+*.dcm
+*.dicom
+*.nii
+*.nii.gz
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Slurm runtime output
+# ---------------------------------------------------------------------------
+slurm-*.out
+*.out
+*.err
+
+# ---------------------------------------------------------------------------
+# Editors and operating system
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~
