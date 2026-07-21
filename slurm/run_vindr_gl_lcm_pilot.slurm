@@ -5,7 +5,6 @@
 #SBATCH --time=04:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
 #SBATCH --output=/home/vault/iwi5/iwi5362h/logs/gl_lcm_vindr_pilot_%j.out
 #SBATCH --error=/home/vault/iwi5/iwi5362h/logs/gl_lcm_vindr_pilot_%j.err
 #SBATCH --mail-type=END,FAIL
