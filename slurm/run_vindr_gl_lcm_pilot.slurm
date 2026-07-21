@@ -68,24 +68,7 @@ fi
 eval "$(conda shell.bash hook)"
 conda activate "${ENV_DIR}"
 
-# ---------------------------------------------------------------------------
-# Locate VinDr train annotations
-# ---------------------------------------------------------------------------
-ANNOTATION_CANDIDATES=(
-    "${VINDR_ROOT}/annotations_train.csv"
-    "${VINDR_ROOT}/annotation_train.csv"
-    "${VINDR_ROOT}/train.csv"
-    "${VINDR_ROOT}/annotations/annotations_train.csv"
-)
-
-ANNOTATIONS_CSV=""
-
-for candidate in "${ANNOTATION_CANDIDATES[@]}"; do
-    if [[ -f "${candidate}" ]]; then
-        ANNOTATIONS_CSV="${candidate}"
-        break
-    fi
-done
+ANNOTATIONS_CSV="${VINDR_ROOT}/annotations/annotations_train.csv"
 
 # ---------------------------------------------------------------------------
 # Validate all required paths
