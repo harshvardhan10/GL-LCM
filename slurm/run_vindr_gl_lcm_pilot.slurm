@@ -6,32 +6,36 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --output=/home/woody/iwi5/iwi5362h/logs/gl_lcm_vindr_pilot_%j.out
-#SBATCH --error=/home/woody/iwi5/iwi5362h/logs/gl_lcm_vindr_pilot_%j.err
+#SBATCH --output=/home/vault/iwi5/iwi5362h/logs/gl_lcm_vindr_pilot_%j.out
+#SBATCH --error=/home/vault/iwi5/iwi5362h/logs/gl_lcm_vindr_pilot_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=harshvardhan.agarwal@fau.de
 
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# Internet access is needed the first time lungs-segmentation downloads weights.
+# Compute-node internet access
 # ---------------------------------------------------------------------------
 PROXY="http://proxy.nhr.fau.de:80"
+
 export http_proxy="${PROXY}"
 export https_proxy="${PROXY}"
 export HTTP_PROXY="${PROXY}"
 export HTTPS_PROXY="${PROXY}"
+
 unset all_proxy ALL_PROXY no_proxy NO_PROXY
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 ROOT="/home/vault/iwi5/iwi5362h/data/bone_suppression/gl_lcm"
-REPO_DIR="${ROOT}/GL-LCM"
-REPO_CODES="${REPO_DIR}/codes"
+
+REPO_DIR="${ROOT}"
+REPO_CODES="${ROOT}/codes"
+
 CHECKPOINT_DIR="${ROOT}/checkpoints"
 ENV_DIR="${ROOT}/gl_lcm_inference_env"
-SCRIPT_DIR="${ROOT}/pilot_scripts"
+SCRIPT_DIR="${ROOT}/scripts"
 
 VINDR_ROOT="/home/woody/iwi5/iwi5362h/data/vindr_cxr"
 VINDR_TRAIN_IMAGES="${VINDR_ROOT}/train"
@@ -40,21 +44,32 @@ PILOT_DIR="${ROOT}/vindr_train_pilot"
 SZCH_OUTPUT="${PILOT_DIR}/outputs_szch"
 JSRT_OUTPUT="${PILOT_DIR}/outputs_jsrt"
 
-TORCH_HOME="${ROOT}/torch_cache"
-XDG_CACHE_HOME="${ROOT}/cache"
-MPLCONFIGDIR="${ROOT}/matplotlib_cache"
-export TORCH_HOME XDG_CACHE_HOME MPLCONFIGDIR
+export TORCH_HOME="${ROOT}/torch_cache"
+export XDG_CACHE_HOME="${ROOT}/cache"
+export MPLCONFIGDIR="${ROOT}/matplotlib_cache"
 
 mkdir -p \
     "${PILOT_DIR}" \
     "${TORCH_HOME}" \
     "${XDG_CACHE_HOME}" \
     "${MPLCONFIGDIR}" \
-    /home/woody/iwi5/iwi5362h/logs
+    /home/vault/iwi5/iwi5362h/logs
 
 # ---------------------------------------------------------------------------
-# Locate VinDr train annotations. The pilot still works without annotations,
-# but label-aware sampling is preferred.
+# Load Python/Conda
+# ---------------------------------------------------------------------------
+module load python
+
+if ! command -v conda >/dev/null 2>&1; then
+    echo "[Error] Conda is unavailable after 'module load python'."
+    exit 1
+fi
+
+eval "$(conda shell.bash hook)"
+conda activate "${ENV_DIR}"
+
+# ---------------------------------------------------------------------------
+# Locate VinDr train annotations
 # ---------------------------------------------------------------------------
 ANNOTATION_CANDIDATES=(
     "${VINDR_ROOT}/annotations_train.csv"
@@ -64,6 +79,7 @@ ANNOTATION_CANDIDATES=(
 )
 
 ANNOTATIONS_CSV=""
+
 for candidate in "${ANNOTATION_CANDIDATES[@]}"; do
     if [[ -f "${candidate}" ]]; then
         ANNOTATIONS_CSV="${candidate}"
@@ -72,11 +88,13 @@ for candidate in "${ANNOTATION_CANDIDATES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# Validation
+# Validate all required paths
 # ---------------------------------------------------------------------------
 required_paths=(
     "${ENV_DIR}/bin/python"
     "${REPO_CODES}/model.py"
+    "${REPO_CODES}/config.py"
+    "${REPO_CODES}/modules/unet.py"
     "${SCRIPT_DIR}/prepare_vindr_train_pilot.py"
     "${SCRIPT_DIR}/infer_gl_lcm_external.py"
     "${SCRIPT_DIR}/make_gl_lcm_pilot_montage.py"
@@ -94,53 +112,69 @@ for path in "${required_paths[@]}"; do
 done
 
 if [[ ! -d "${VINDR_TRAIN_IMAGES}" ]]; then
-    echo "[Error] VinDr train image directory missing: ${VINDR_TRAIN_IMAGES}"
+    echo "[Error] VinDr train image directory missing:"
+    echo "        ${VINDR_TRAIN_IMAGES}"
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# Activate Conda
+# Runtime verification
 # ---------------------------------------------------------------------------
-CONDA_EXE="$(command -v conda || true)"
-if [[ -z "${CONDA_EXE}" ]]; then
-    for candidate in \
-        "${HOME}/miniconda3/bin/conda" \
-        "${HOME}/anaconda3/bin/conda" \
-        "${HOME}/miniforge3/bin/conda" \
-        "${HOME}/mambaforge/bin/conda"; do
-        if [[ -x "${candidate}" ]]; then
-            CONDA_EXE="${candidate}"
-            break
-        fi
-    done
-fi
-
-if [[ -z "${CONDA_EXE}" ]]; then
-    echo "[Error] Conda not found"
-    exit 1
-fi
-
-CONDA_BASE="$("${CONDA_EXE}" info --base)"
-# shellcheck disable=SC1090
-source "${CONDA_BASE}/etc/profile.d/conda.sh"
-conda activate "${ENV_DIR}"
-
 echo "======================================================================"
 echo "VinDr train GL-LCM inference pilot"
 echo "Host:              $(hostname)"
 echo "Started:           $(date --iso-8601=seconds)"
-echo "GPU:"
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
-echo "Python:            $(which python)"
-python --version
 echo "Repository:        ${REPO_DIR}"
+echo "Scripts:           ${SCRIPT_DIR}"
 echo "VinDr train:       ${VINDR_TRAIN_IMAGES}"
 echo "Annotations:       ${ANNOTATIONS_CSV:-not found; random sampling will be used}"
 echo "Pilot directory:   ${PILOT_DIR}"
+echo "Conda prefix:      ${CONDA_PREFIX}"
+echo "Python:            $(which python)"
 echo "======================================================================"
 
+python --version
+
+echo
+echo "[GPU]"
+nvidia-smi \
+    --query-gpu=name,memory.total,driver_version \
+    --format=csv,noheader
+
+echo
+echo "[Verify] Python environment"
+
+python - <<'PY'
+import sys
+
+import cv2
+import diffusers
+import generative
+import monai
+import torch
+import torchvision
+
+import lungs_segmentation
+from lungs_segmentation.pre_trained_models import create_model
+
+print("Python executable:", sys.executable)
+print("Torch:", torch.__version__)
+print("Torchvision:", torchvision.__version__)
+print("CUDA build:", torch.version.cuda)
+print("CUDA available:", torch.cuda.is_available())
+
+if not torch.cuda.is_available():
+    raise RuntimeError("CUDA is not available inside the allocated A40 job")
+
+print("GPU:", torch.cuda.get_device_name(0))
+print("OpenCV:", cv2.__version__)
+print("Diffusers:", diffusers.__version__)
+print("MONAI:", monai.__version__)
+print("Core imports successful")
+PY
+
 # ---------------------------------------------------------------------------
-# 1. Select ten VinDr train images and prepare lung masks.
+# 1. Select ten VinDr train images and prepare lung masks
 # ---------------------------------------------------------------------------
 PREPARE_ARGS=(
     --images_root "${VINDR_TRAIN_IMAGES}"
@@ -156,11 +190,18 @@ if [[ -n "${ANNOTATIONS_CSV}" ]]; then
     PREPARE_ARGS+=(--annotations_csv "${ANNOTATIONS_CSV}")
 fi
 
-python "${SCRIPT_DIR}/prepare_vindr_train_pilot.py" "${PREPARE_ARGS[@]}"
+echo
+echo "[Stage 1/4] Preparing VinDr images and lung masks"
+
+python "${SCRIPT_DIR}/prepare_vindr_train_pilot.py" \
+    "${PREPARE_ARGS[@]}"
 
 # ---------------------------------------------------------------------------
-# 2. Run the SZCH checkpoint pair.
+# 2. Run SZCH checkpoint pair
 # ---------------------------------------------------------------------------
+echo
+echo "[Stage 2/4] Running SZCH checkpoint pair"
+
 cd "${REPO_CODES}"
 
 python "${SCRIPT_DIR}/infer_gl_lcm_external.py" \
@@ -177,16 +218,26 @@ python "${SCRIPT_DIR}/infer_gl_lcm_external.py" \
     --seed 42 \
     --device cuda
 
-# Free Python/CUDA process memory before loading the second checkpoint pair.
+# Each inference command is a separate Python process, so its GPU memory is
+# released when it exits. This is only a lightweight sanity check.
 python - <<'PY'
 import torch
+
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
+
+print(
+    "CUDA memory currently allocated:",
+    torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+)
 PY
 
 # ---------------------------------------------------------------------------
-# 3. Run the JSRT checkpoint pair with the same selected images and noise seeds.
+# 3. Run JSRT checkpoint pair
 # ---------------------------------------------------------------------------
+echo
+echo "[Stage 3/4] Running JSRT checkpoint pair"
+
 python "${SCRIPT_DIR}/infer_gl_lcm_external.py" \
     --repo_codes_dir "${REPO_CODES}" \
     --input_dir "${PILOT_DIR}/CXR" \
@@ -202,8 +253,11 @@ python "${SCRIPT_DIR}/infer_gl_lcm_external.py" \
     --device cuda
 
 # ---------------------------------------------------------------------------
-# 4. Produce a contact sheet for visual model selection.
+# 4. Produce comparison montage
 # ---------------------------------------------------------------------------
+echo
+echo "[Stage 4/4] Creating comparison montage"
+
 python "${SCRIPT_DIR}/make_gl_lcm_pilot_montage.py" \
     --pilot_dir "${PILOT_DIR}" \
     --szch_dir "${SZCH_OUTPUT}" \
@@ -213,12 +267,25 @@ python "${SCRIPT_DIR}/make_gl_lcm_pilot_montage.py" \
 echo
 echo "======================================================================"
 echo "Pilot complete"
+echo "======================================================================"
+
+echo
 echo "Manifest:"
-column -s, -t < "${PILOT_DIR}/pilot_manifest.csv" || cat "${PILOT_DIR}/pilot_manifest.csv"
+
+if command -v column >/dev/null 2>&1; then
+    column -s, -t < "${PILOT_DIR}/pilot_manifest.csv"
+else
+    cat "${PILOT_DIR}/pilot_manifest.csv"
+fi
+
 echo
-echo "Outputs:"
+echo "Generated files:"
 find "${PILOT_DIR}" -maxdepth 3 -type f | sort
+
 echo
+echo "Pilot storage usage:"
 du -sh "${PILOT_DIR}"
+
+echo
 echo "Finished: $(date --iso-8601=seconds)"
 echo "======================================================================"
