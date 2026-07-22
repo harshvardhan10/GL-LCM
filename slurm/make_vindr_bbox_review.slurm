@@ -1,6 +1,5 @@
 #!/bin/bash -l
 #SBATCH --job-name=vindr-bbox-review
-#SBATCH --partition=a40
 #SBATCH --time=00:30:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
