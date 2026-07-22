@@ -41,16 +41,22 @@ echo "Output dir:   ${OUTPUT_DIR}"
 echo "======================================================================"
 
 ANNOTATIONS_CSV="${VINDR_ROOT}/annotations/annotations_train.csv"
+META_CSV="${VINDR_ROOT}/train_meta.csv"
 
-if [[ -z "${ANNOTATIONS_CSV}" ]]; then
-    echo "[Error] VinDr training annotation CSV was not found."
-    echo
-    echo "CSV files available under ${VINDR_ROOT}:"
-    find "${VINDR_ROOT}" -maxdepth 3 -type f -iname "*.csv" | sort
+if [[ ! -f "${ANNOTATIONS_CSV}" ]]; then
+    echo "[Error] Annotation CSV missing: ${ANNOTATIONS_CSV}"
     exit 1
 fi
 
-echo "Annotations:  ${ANNOTATIONS_CSV}"
+if [[ ! -f "${META_CSV}" ]]; then
+    echo "[Error] Metadata CSV missing: ${META_CSV}"
+    echo "Available metadata candidates:"
+    find "${VINDR_ROOT}" -maxdepth 3 -type f -iname '*meta*.csv'
+    exit 1
+fi
+
+echo "Annotations: ${ANNOTATIONS_CSV}"
+echo "Metadata:    ${META_CSV}"
 
 # ---------------------------------------------------------------------------
 # Validate required files
@@ -65,6 +71,7 @@ required_paths=(
     "${PILOT_DIR}/pilot_files.txt"
     "${PILOT_DIR}/pilot_manifest.csv"
     "${ANNOTATIONS_CSV}"
+    "${META_CSV}"
 )
 
 for path in "${required_paths[@]}"; do
@@ -82,6 +89,7 @@ mkdir -p "${OUTPUT_DIR}"
 python "${SCRIPT}" \
     --pilot_dir "${PILOT_DIR}" \
     --annotations_csv "${ANNOTATIONS_CSV}" \
+    --meta_csv "${META_CSV}" \
     --output_dir "${OUTPUT_DIR}" \
     --szch_dir "${PILOT_DIR}/outputs_szch/Fusion_BS" \
     --jsrt_dir "${PILOT_DIR}/outputs_jsrt/Fusion_BS" \
