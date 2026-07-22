@@ -40,25 +40,7 @@ echo "Pilot dir:    ${PILOT_DIR}"
 echo "Output dir:   ${OUTPUT_DIR}"
 echo "======================================================================"
 
-# ---------------------------------------------------------------------------
-# Locate the VinDr training annotation CSV
-# ---------------------------------------------------------------------------
-ANNOTATION_CANDIDATES=(
-    "${VINDR_ROOT}/annotations_train.csv"
-    "${VINDR_ROOT}/annotation_train.csv"
-    "${VINDR_ROOT}/train.csv"
-    "${VINDR_ROOT}/annotations/annotations_train.csv"
-    "${VINDR_ROOT}/annotations/train.csv"
-)
-
-ANNOTATIONS_CSV=""
-
-for candidate in "${ANNOTATION_CANDIDATES[@]}"; do
-    if [[ -f "${candidate}" ]]; then
-        ANNOTATIONS_CSV="${candidate}"
-        break
-    fi
-done
+ANNOTATIONS_CSV="${VINDR_ROOT}/annotations/annotations_train.csv"
 
 if [[ -z "${ANNOTATIONS_CSV}" ]]; then
     echo "[Error] VinDr training annotation CSV was not found."

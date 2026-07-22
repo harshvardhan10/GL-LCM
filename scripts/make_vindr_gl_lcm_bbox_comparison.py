@@ -47,6 +47,8 @@ XMIN_CANDIDATES = ["x_min", "xmin", "x1", "left"]
 YMIN_CANDIDATES = ["y_min", "ymin", "y1", "top"]
 XMAX_CANDIDATES = ["x_max", "xmax", "x2", "right"]
 YMAX_CANDIDATES = ["y_max", "ymax", "y2", "bottom"]
+WIDTH_CANDIDATES = ["width", "W", "image_width", "dim1"]
+HEIGHT_CANDIDATES = ["height", "H", "image_height", "dim0"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -58,6 +60,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--pilot_dir", type=Path, required=True)
     parser.add_argument("--annotations_csv", type=Path, required=True)
+    parser.add_argument(
+        "--meta_csv",
+        type=Path,
+        default=None,
+        help=(
+            "VinDr metadata CSV containing original image dimensions, e.g. "
+            "image_id, dim0, dim1. Required when the images under CXR/ were "
+            "pre-resized before the pilot was created."
+        ),
+    )
     parser.add_argument("--output_dir", type=Path, default=None)
     parser.add_argument("--szch_dir", type=Path, default=None)
     parser.add_argument("--jsrt_dir", type=Path, default=None)
@@ -333,6 +345,44 @@ def resolve_annotation_schema(annotations: pd.DataFrame) -> dict[str, str]:
     return {key: str(value) for key, value in mapping.items()}
 
 
+def load_original_dimensions(meta_csv: Path) -> dict[str, tuple[int, int]]:
+    """Return image_id -> (height, width) using original VinDr dimensions."""
+    if not meta_csv.is_file():
+        raise FileNotFoundError(f"VinDr metadata CSV not found: {meta_csv}")
+
+    meta = pd.read_csv(meta_csv)
+    id_col = find_column(meta.columns, ID_CANDIDATES)
+    width_col = find_column(meta.columns, WIDTH_CANDIDATES)
+    height_col = find_column(meta.columns, HEIGHT_CANDIDATES)
+
+    missing = []
+    if id_col is None:
+        missing.append("image_id")
+    if width_col is None:
+        missing.append("width/dim1")
+    if height_col is None:
+        missing.append("height/dim0")
+    if missing:
+        raise ValueError(
+            f"Could not detect metadata columns {missing}. "
+            f"Available columns: {list(meta.columns)}"
+        )
+
+    dims = meta[[id_col, height_col, width_col]].copy()
+    dims.columns = ["image_id", "height", "width"]
+    dims["image_id"] = dims["image_id"].astype(str).map(lambda x: Path(x).stem)
+    dims["height"] = pd.to_numeric(dims["height"], errors="coerce")
+    dims["width"] = pd.to_numeric(dims["width"], errors="coerce")
+    dims = dims.dropna(subset=["height", "width"])
+    dims = dims[(dims["height"] > 1) & (dims["width"] > 1)]
+    dims = dims.drop_duplicates(subset=["image_id"], keep="first")
+
+    return {
+        str(row.image_id): (int(row.height), int(row.width))
+        for row in dims.itertuples(index=False)
+    }
+
+
 def main() -> None:
     args = parse_args()
     pilot_dir = args.pilot_dir.resolve()
@@ -345,6 +395,8 @@ def main() -> None:
         raise FileNotFoundError(f"Pilot manifest not found: {manifest_path}")
     if not args.annotations_csv.is_file():
         raise FileNotFoundError(f"Annotation CSV not found: {args.annotations_csv}")
+    if args.meta_csv is not None and not args.meta_csv.is_file():
+        raise FileNotFoundError(f"Metadata CSV not found: {args.meta_csv}")
 
     manifest = pd.read_csv(manifest_path)
     if args.max_images > 0:
@@ -354,6 +406,9 @@ def main() -> None:
 
     annotations_raw = pd.read_csv(args.annotations_csv)
     schema = resolve_annotation_schema(annotations_raw)
+    original_dimensions = (
+        load_original_dimensions(args.meta_csv) if args.meta_csv is not None else {}
+    )
 
     annotations = annotations_raw.rename(
         columns={
@@ -427,17 +482,31 @@ def main() -> None:
                     f"{name}={image.shape[:2]}"
                 )
 
-        source_shape = load_original_shape(
-            str(manifest_row.get("source_path", "")),
-            fallback_shape=target_shape,
-        )
+        if image_id in original_dimensions:
+            source_shape = original_dimensions[image_id]
+            dimension_source = "meta_csv"
+        else:
+            source_shape = load_original_shape(
+                str(manifest_row.get("source_path", "")),
+                fallback_shape=target_shape,
+            )
+            dimension_source = "source_image"
 
-        image_boxes = annotations[annotations["image_id"] == image_id][
+        raw_boxes = annotations[annotations["image_id"] == image_id][
             ["class_name", "x1", "y1", "x2", "y2"]
         ].copy()
-        image_boxes = scale_boxes(image_boxes, source_shape, target_shape)
+        image_boxes = scale_boxes(raw_boxes, source_shape, target_shape)
         image_boxes = nms_same_class(image_boxes, args.nms_iou)
         total_boxes += len(image_boxes)
+
+        print(
+            f"[Boxes] {image_id}: raw={len(raw_boxes)}, retained={len(image_boxes)}, "
+            f"source_shape={source_shape}, target_shape={target_shape}, "
+            f"dimensions={dimension_source}"
+        )
+        if len(raw_boxes) > 0 and image_boxes.empty:
+            raw_range = raw_boxes[["x1", "y1", "x2", "y2"]].agg(["min", "max"])
+            print(f"[Warning] All boxes collapsed for {image_id}. Raw coordinate range:\n{raw_range}")
 
         annotated = {
             "Original + GT": draw_boxes(original, image_boxes),
@@ -507,7 +576,16 @@ def main() -> None:
         )
 
     if total_boxes == 0:
-        raise RuntimeError("No valid boxes remained after scaling/filtering")
+        meta_hint = (
+            " The supplied --meta_csv did not resolve the dimensions correctly."
+            if args.meta_csv is not None
+            else
+            " Supply --meta_csv with the original VinDr image dimensions "
+            "(normally train_meta.csv containing dim0 and dim1)."
+        )
+        raise RuntimeError(
+            "No valid boxes remained after scaling/filtering." + meta_hint
+        )
 
     # Combined annotated contact sheet.
     columns = ["Original + GT", "Lung mask + GT", "SZCH + GT", "JSRT + GT"]
