@@ -2,11 +2,10 @@
 #SBATCH --job-name=gl-lcm-mimic-szch
 #SBATCH --partition=a40
 #SBATCH --gres=gpu:a40:1
-#SBATCH --time=24:00:00
+#SBATCH --time=3:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
-#SBATCH --array=0-430%8
+#SBATCH --cpus-per-task=2
+#SBATCH --array=0-430%32
 #SBATCH --output=/home/vault/iwi5/iwi5362h/logs/gl_lcm_mimic_szch_%A_%a.out
 #SBATCH --error=/home/vault/iwi5/iwi5362h/logs/gl_lcm_mimic_szch_%A_%a.err
 #SBATCH --mail-type=END,FAIL
